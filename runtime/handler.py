@@ -15,6 +15,47 @@ import requests
 logger = logging.getLogger("alphafold.handler")
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
+_INITIALIZED = False
+
+
+def _run_script(cmd: list[str]) -> str:
+    try:
+        out = subprocess.run(
+            cmd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        ).stdout
+        return out
+    except subprocess.CalledProcessError as exc:
+        return exc.stdout or str(exc)
+
+
+def _init_once():
+    global _INITIALIZED
+    if _INITIALIZED:
+        return
+    logger.info("[INIT] Starting storage bootstrap + diagnostics")
+    logger.info(
+        "[INIT] ENV ALPHAFOLD_DB_PATH=%s, RUNPOD_VOLUME_ROOT=%s",
+        os.environ.get("ALPHAFOLD_DB_PATH", "/data/alphafold"),
+        os.environ.get("RUNPOD_VOLUME_ROOT", "/runpod-volume"),
+    )
+
+    # Run bootstrap (idempotent)
+    bootstrap_out = _run_script(["/bin/bash", "/app/bootstrap_db.sh", "--diagnose"])
+    for line in bootstrap_out.splitlines():
+        logger.info("%s", line)
+
+    # Additional diagnosis snapshot
+    diag_out = _run_script(["/bin/bash", "/app/diagnose_storage.sh"])
+    for line in diag_out.splitlines():
+        logger.info("%s", line)
+
+    _INITIALIZED = True
+    logger.info("[INIT] Initialization finished")
+
 
 def _write_fasta_from_sequence(sequence: str, target_path: Path) -> Path:
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,6 +202,12 @@ def main():
     if args.local:
         _run_local(args.local)
         return
+
+    # Initialize storage and log mount status before starting serverless
+    try:
+        _init_once()
+    except Exception as e:
+        logger.warning("[INIT] Bootstrap failed: %s", e)
 
     runpod.serverless.start({"handler": handler})
 

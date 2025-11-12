@@ -9,9 +9,9 @@ ENV APP_HOME=/app \
 
 WORKDIR ${APP_HOME}
 
-COPY runtime/run_alphafold.sh runtime/handler.py runtime/download_models.sh ${APP_HOME}/
+COPY runtime/run_alphafold.sh runtime/handler.py runtime/download_models.sh runtime/bootstrap_db.sh runtime/diagnose_storage.sh ${APP_HOME}/
 
-RUN chmod +x ${APP_HOME}/run_alphafold.sh ${APP_HOME}/download_models.sh
+RUN chmod +x ${APP_HOME}/run_alphafold.sh ${APP_HOME}/download_models.sh ${APP_HOME}/bootstrap_db.sh ${APP_HOME}/diagnose_storage.sh
 
 COPY sample_data ${APP_HOME}/sample_data
 
