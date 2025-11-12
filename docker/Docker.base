@@ -15,7 +15,9 @@ ENV TZ=Etc/UTC \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt-get update && \
+# Disable NVIDIA apt repos (TLS can fail behind corporate proxies; not needed for Ubuntu packages)
+RUN rm -f /etc/apt/sources.list.d/cuda* /etc/apt/sources.list.d/nvidia* || true && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         aria2 \
         build-essential \
@@ -42,6 +44,10 @@ RUN apt-get update && \
         zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
+# Optionally trust a corporate CA provided at build time as a BuildKit secret 'corpca'
+RUN --mount=type=secret,id=corpca,required=false,target=/usr/local/share/ca-certificates/corp-rootCA.crt \
+    bash -lc 'if [ -f /usr/local/share/ca-certificates/corp-rootCA.crt ]; then update-ca-certificates; fi'
+
 # HH-suite (필수 바이너리) 설치
 RUN git clone --branch v3.3.0 --single-branch https://github.com/soedinglab/hh-suite.git /tmp/hh-suite && \
     mkdir /tmp/hh-suite/build && \
@@ -56,14 +62,25 @@ RUN git clone --branch v3.3.0 --single-branch https://github.com/soedinglab/hh-s
 RUN wget -q -P /tmp https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
     bash /tmp/Miniconda3-latest-Linux-x86_64.sh -b -p ${CONDA_DIR} && \
     rm /tmp/Miniconda3-latest-Linux-x86_64.sh && \
-    ${CONDA_DIR}/bin/conda install -y conda==24.11.1 && \
+    ${CONDA_DIR}/bin/conda config --system --set channel_priority strict && \
+    ${CONDA_DIR}/bin/conda config --system --remove channels defaults || true && \
+    ${CONDA_DIR}/bin/conda config --system --add channels conda-forge && \
     ${CONDA_DIR}/bin/conda create -y -n ${CONDA_ENV} python=3.10.13 pip=24.2 && \
     ${CONDA_DIR}/bin/conda clean --all --yes
 
 # Alphafold 소스 코드 및 종속 데이터 다운로드
 RUN git clone --branch ${ALPHAFOLD_VERSION} --depth 1 --single-branch https://github.com/google-deepmind/alphafold.git ${ALPHAFOLD_DIR} && \
-    wget -q -O ${ALPHAFOLD_DIR}/alphafold/common/stereo_chemical_props.txt \
-      https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
+    bash -lc 'set -e; dest="${ALPHAFOLD_DIR}/alphafold/common/stereo_chemical_props.txt"; \
+      for url in \
+        https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt \
+        https://raw.githubusercontent.com/sokrypton/ColabFold/main/beta/stereo_chemical_props.txt \
+        https://raw.githubusercontent.com/aqlaboratory/openfold/main/openfold/resources/stereo_chemical_props.txt; do \
+        echo "[stereo_props] Trying $url"; \
+        if curl -fsSL --retry 5 --retry-delay 2 "$url" -o "$dest"; then echo "[stereo_props] Downloaded"; break; fi; \
+      done; test -s "$dest"'
+
+# Adjust SciPy pin for Python 3.10 compatibility (AlphaFold v2.3.2 pins 1.7.0)
+RUN sed -i 's/^scipy==1\.7\.0$/scipy==1.8.1/' ${ALPHAFOLD_DIR}/requirements.txt || true
 
 # Conda 기반 의존성 설치 (GPU 지원 OpenMM 포함)
 RUN ${CONDA_DIR}/bin/conda install -y -n ${CONDA_ENV} -c conda-forge \

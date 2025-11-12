@@ -14,6 +14,8 @@ Environment variables:
   IMAGE_TAG            Image tag (default: timestamp, YYYYMMDDHHMM).
   CUDA_IMAGE           Override base CUDA image for Docker.base (default in Dockerfile).
   PUSH                 Set to 0 to skip docker push (default: 1).
+  DOCKER_CLI           Override container CLI (docker or nerdctl). Auto-detect by default.
+  CORP_CA_PATH         Optional path to a corporate CA cert to inject at build (uses BuildKit secret).
 
 Options:
   -h, --help           Show this help.
@@ -57,13 +59,47 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BASE_TAG="${REGISTRY}/${IMAGE_NAME}-base:${IMAGE_TAG}"
 FINAL_TAG="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
+# Pick container CLI (docker or nerdctl)
+pick_cli() {
+    if [[ -n "${DOCKER_CLI:-}" ]]; then
+        echo "${DOCKER_CLI}"
+        return
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        if docker version >/dev/null 2>&1; then
+            echo docker
+            return
+        fi
+    fi
+    if command -v nerdctl >/dev/null 2>&1; then
+        echo nerdctl
+        return
+    fi
+    echo ""  # not found
+}
+
+DOCKER_BIN="$(pick_cli)"
+if [[ -z "${DOCKER_BIN}" ]]; then
+    echo "[!] No working container CLI found. Install Docker or nerdctl (Rancher Desktop)." >&2
+    exit 10
+fi
+echo "[i] Using container CLI: ${DOCKER_BIN}"
+
 echo "[+] Building base image: ${BASE_TAG}"
 BASE_ARGS=()
 if [[ -n "${CUDA_IMAGE}" ]]; then
     BASE_ARGS+=("--build-arg" "CUDA_IMAGE=${CUDA_IMAGE}")
 fi
+if [[ -n "${CORP_CA_PATH:-}" ]]; then
+    if [[ -f "${CORP_CA_PATH}" ]]; then
+        BASE_ARGS+=("--secret" "id=corpca,src=${CORP_CA_PATH}")
+        echo "[i] Injecting corporate CA via BuildKit secret: ${CORP_CA_PATH}"
+    else
+        echo "[!] CORP_CA_PATH set but file not found: ${CORP_CA_PATH}" >&2
+    fi
+fi
 
-docker build \
+"${DOCKER_BIN}" build \
     "${BASE_ARGS[@]}" \
     ${NO_CACHE} \
     -f "${PROJECT_ROOT}/docker/Docker.base" \
@@ -71,7 +107,7 @@ docker build \
     "${PROJECT_ROOT}"
 
 echo "[+] Building runtime image: ${FINAL_TAG}"
-docker build \
+"${DOCKER_BIN}" build \
     --build-arg "BASE_IMAGE=${BASE_TAG}" \
     ${NO_CACHE} \
     -f "${PROJECT_ROOT}/docker/Docker" \
@@ -80,10 +116,10 @@ docker build \
 
 if [[ "${PUSH}" == "1" ]]; then
     echo "[+] Pushing ${BASE_TAG}"
-    docker push "${BASE_TAG}"
+    "${DOCKER_BIN}" push "${BASE_TAG}"
 
     echo "[+] Pushing ${FINAL_TAG}"
-    docker push "${FINAL_TAG}"
+    "${DOCKER_BIN}" push "${FINAL_TAG}"
 else
     echo "[!] PUSH=0, skipping docker push."
 fi

@@ -33,3 +33,12 @@ Thumbs.db
 coverage/
 .pytest_cache/
 
+# Local corporate certificates (do not commit)
+certs/*.crt
+certs/*.cer
+certs/*.pem
+certs/*.der
+certs/*.p7b
+certs/*.p12
+certs/*.pfx
+!certs/README.md

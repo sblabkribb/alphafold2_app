@@ -32,9 +32,13 @@ set +a
 2. RunPod에서 Serverless 엔드포인트 생성 (`RUNPOD_HANDLER=handler.handler`)
 3. 샘플 요청 전송
    ```bash
-   export RUNPOD_API_KEY=...
-   export RUNPOD_ENDPOINT_ID=...
-   python client/submit_job.py --sequence-file sample_data/sequence.fasta
+   python3 client/submit_job.py --endpoint n3tcpxdv3irr46 --api-key 'rpa_xxx' --sequence-file sample_data/sequence.fasta --ca-bundle certs/soosan-eprism.crt
+   ```
+   또는 .env 로드 후 동기 실행(폴링 포함)
+   ```bash
+   set -a && source .env && set +a
+   REQUESTS_CA_BUNDLE=certs/soosan-eprism.crt python3 client/submit_job.py --sequence-file sample_data/sequence.fasta
    ```
 
 추가 세부사항 및 테스트 절차는 명세서를 참고하세요.
+
