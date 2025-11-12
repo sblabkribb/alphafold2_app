@@ -1,16 +1,17 @@
 # syntax=docker/dockerfile:1.5
 
-ARG CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
-FROM ${CUDA_IMAGE}
+ARG CUDA_VERSION=12.2.2
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn8-runtime-ubuntu20.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG ALPHAFOLD_VERSION=release-2.3.2
-ARG VENV_PATH=/opt/alphafold/venv
+ARG ALPHAFOLD_VERSION=v2.3.2
 
 ENV TZ=Etc/UTC \
     ALPHAFOLD_DIR=/opt/alphafold \
-    VENV_PATH=${VENV_PATH} \
-    PATH=${VENV_PATH}/bin:${PATH}
+    CONDA_DIR=/opt/conda \
+    CONDA_ENV=alphafold \
+    VENV_PATH=/opt/conda/envs/alphafold \
+    PATH=/opt/conda/envs/alphafold/bin:/opt/conda/bin:${PATH}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -25,44 +26,68 @@ RUN apt-get update && \
         hmmer \
         kalign \
         libffi-dev \
+        libglib2.0-0 \
         libglu1-mesa \
         libgoogle-glog-dev \
-        libopenmm-dev \
-        libpython3-dev \
+        libsqlite3-dev \
         libssl-dev \
         libxml2 \
         libxml2-dev \
         libxmlsec1-dev \
+        lsb-release \
         openjdk-11-jdk \
-        python3 \
-        python3-distutils \
-        python3-pip \
-        python3-venv \
+        pkg-config \
+        tzdata \
         wget \
-        zlib1g-dev \
-        hh-suite && \
+        zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Alphafold 소스 코드 및 Python 환경 구성
-RUN git clone --branch ${ALPHAFOLD_VERSION} --depth 1 https://github.com/deepmind/alphafold.git ${ALPHAFOLD_DIR} && \
-    python3 -m venv ${VENV_PATH} && \
-    source ${VENV_PATH}/bin/activate && \
+# HH-suite (필수 바이너리) 설치
+RUN git clone --branch v3.3.0 --single-branch https://github.com/soedinglab/hh-suite.git /tmp/hh-suite && \
+    mkdir /tmp/hh-suite/build && \
+    cd /tmp/hh-suite/build && \
+    cmake -DCMAKE_INSTALL_PREFIX=/opt/hhsuite .. && \
+    make -j"$(nproc)" && \
+    make install && \
+    ln -s /opt/hhsuite/bin/* /usr/bin/ && \
+    rm -rf /tmp/hh-suite
+
+# Miniconda 및 Alphafold 전용 환경 생성
+RUN wget -q -P /tmp https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    bash /tmp/Miniconda3-latest-Linux-x86_64.sh -b -p ${CONDA_DIR} && \
+    rm /tmp/Miniconda3-latest-Linux-x86_64.sh && \
+    ${CONDA_DIR}/bin/conda install -y conda==24.11.1 && \
+    ${CONDA_DIR}/bin/conda create -y -n ${CONDA_ENV} python=3.10.13 pip=24.2 && \
+    ${CONDA_DIR}/bin/conda clean --all --yes
+
+# Alphafold 소스 코드 및 종속 데이터 다운로드
+RUN git clone --branch ${ALPHAFOLD_VERSION} --depth 1 --single-branch https://github.com/google-deepmind/alphafold.git ${ALPHAFOLD_DIR} && \
+    wget -q -O ${ALPHAFOLD_DIR}/alphafold/common/stereo_chemical_props.txt \
+      https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt
+
+# Conda 기반 의존성 설치 (GPU 지원 OpenMM 포함)
+RUN ${CONDA_DIR}/bin/conda install -y -n ${CONDA_ENV} -c conda-forge \
+        openmm=8.0.0 \
+        pdbfixer && \
+    ${CONDA_DIR}/bin/conda clean --all --yes
+
+# Pip 패키지 설치 (jax GPU 빌드 포함)
+RUN source ${CONDA_DIR}/bin/activate ${CONDA_ENV} && \
     pip install --upgrade pip && \
-    pip install -r ${ALPHAFOLD_DIR}/requirements.txt && \
-    pip install \
+    pip install --no-cache-dir -r ${ALPHAFOLD_DIR}/requirements.txt && \
+    pip install --no-cache-dir \
+        "jax==0.4.26" \
+        "jaxlib==0.4.26+cuda12.cudnn89" \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html && \
+    pip install --no-cache-dir \
         dm-tree==0.1.8 \
-        openmm==7.7.0 \
-        pdbfixer==1.7 \
-        numpy==1.23.5 \
         runpod && \
     pip cache purge && \
     find ${ALPHAFOLD_DIR} -name "__pycache__" -type d -prune -exec rm -rf {} +
 
-# 환경 변수와 편의 상징 링크 설정
-RUN ln -s /usr/bin/python3 /usr/bin/python && \
-    echo "source ${VENV_PATH}/bin/activate" >> /etc/profile.d/alphafold.sh
+# ldconfig 실행 권한 조정 (GPU 가시성 확보)
+RUN chmod u+s /sbin/ldconfig.real
 
 WORKDIR ${ALPHAFOLD_DIR}
 
-# 기본 엔트리포인트는 상위 이미지에서 재정의한다.
 CMD ["/bin/bash"]

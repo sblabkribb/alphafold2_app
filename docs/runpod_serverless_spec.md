@@ -27,15 +27,16 @@ alphafold2_app/
 ## 3. Docker 구성
 
 ### 3.1 Docker.base
-- **베이스 이미지**: `nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04`
+- **베이스 이미지**: `nvidia/cuda:${CUDA_VERSION}-cudnn8-runtime-ubuntu20.04` (기본 `12.2.2`)
 - **시스템 패키지**
-  - `build-essential`, `wget`, `git`, `curl`, `python3.10`, `python3-pip`, `python3-venv`, `openjdk-11-jdk`, `aria2`, `libssl-dev`, `libffi-dev`, `libxml2`, `libxmlsec1-dev`, `libopenmm-dev`, `libcudnn8`
-  - Alphafold 전처리에 필요한 `hmmer`, `kalign`, `jackhmmer`, `hhsuite`
-- **Python 환경**
-  - `/opt/alphafold` 경로에 alphafold 소스 클론 (`release-2.3.2` 태그)
-  - `pip install -r requirements.txt`
-  - OpenMM, Kalign 추가 파이썬 의존성 설치
-  - Alphafold 실행 스크립트를 PATH에 추가
+  - `build-essential`, `wget`, `git`, `curl`, `openjdk-11-jdk`, `aria2`, `libssl-dev`, `libffi-dev`, `libxml2`, `libxmlsec1-dev`, `libgoogle-glog-dev`, `tzdata`, `pkg-config`
+  - Alphafold 전처리에 필요한 `hmmer`, `kalign`, `hhsuite`(v3.3.0, 소스 빌드)
+- **Python/Conda 환경**
+  - Miniconda 설치 후 `alphafold` 전용 환경(`/opt/conda/envs/alphafold`) 생성
+  - Alphafold 소스 태그 `v2.3.2` 클론 → `stereo_chemical_props.txt` 추가 다운로드
+  - Conda로 GPU 지원 `openmm=8.0.0`, `pdbfixer` 설치
+  - Pip으로 Alphafold `requirements.txt`, `jax==0.4.26`, `jaxlib==0.4.26+cuda12.cudnn89`, `dm-tree`, `runpod` 설치
+  - `PATH`와 `VENV_PATH`를 Conda env로 지정
 - **모델 데이터**
   - 기본 이미지는 모델 가중치를 포함하지 않는다.
   - 대신 `/opt/alphafold/run_alphafold.sh`에서 런타임에 RunPod Volume 또는 S3에서 마운트하도록 설계.
@@ -52,7 +53,7 @@ alphafold2_app/
   - 간단한 self-test 스크립트를 추가할 수 있도록 `CMD ["python3", "-m", "handler"]` 구조 고려
 
 ### 3.3 런타임 스크립트
-- `run_alphafold.sh`: 입력 FASTA 파일 경로와 출력 디렉터리를 받아 Alphafold 메인 스크립트를 실행한다.
+- `run_alphafold.sh`: 입력 FASTA 파일 경로와 출력 디렉터리를 받아 Alphafold 메인 스크립트를 실행한다. Conda env를 자동 활성화한다.
 - `handler.py`: RunPod serverless 형식에 맞춰 `def handler(event):` 구현.
   - 입력: FASTA 시퀀스 문자열 또는 FASTA 파일 URL
   - 처리: 임시 디렉터리에 FASTA 작성 → `run_alphafold.sh` 실행 → 결과 디렉터리를 압축 후 업로드/반환
@@ -136,4 +137,3 @@ alphafold2_app/
 - FastAPI 기반 REST wrapper 제공
 - 멀티 시퀀스 배치 처리
 - 관측값(메트릭) -> 로깅/모니터링 시스템 연동
-

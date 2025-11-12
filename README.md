@@ -11,6 +11,16 @@ RunPod Serverless 배포를 위한 Alphafold2 이미지 및 사용 도구 모음
 - `client/submit_job.py` – RunPod API 요청 예제
 - `sample_data/sequence.fasta` – 테스트 FASTA 예제
 
+## 환경변수 주입
+.env.example을 .env로 복사하여 안에 값 채우고 난 뒤
+
+```bash
+set -a
+source .env
+set +a
+```
+
+
 ## 빠른 시작
 1. 레지스트리 정보를 환경 변수로 설정한 뒤 빌드/푸시
    ```bash
