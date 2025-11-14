@@ -15,6 +15,7 @@ Environment variables:
   CUDA_IMAGE           Override base CUDA image for Docker.base (default in Dockerfile).
   PUSH                 Set to 0 to skip docker push (default: 1).
   DOCKER_CLI           Override container CLI (docker or nerdctl). Auto-detect by default.
+  ALSO_LATEST          Tag images as :latest in addition (default: 1).
   CORP_CA_PATH         Optional path to a corporate CA cert to inject at build (uses BuildKit secret).
 
 Options:
@@ -58,6 +59,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 BASE_TAG="${REGISTRY}/${IMAGE_NAME}-base:${IMAGE_TAG}"
 FINAL_TAG="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+LATEST_BASE="${REGISTRY}/${IMAGE_NAME}-base:latest"
+LATEST_FINAL="${REGISTRY}/${IMAGE_NAME}:latest"
 
 # Pick container CLI (docker or nerdctl)
 pick_cli() {
@@ -114,12 +117,26 @@ echo "[+] Building runtime image: ${FINAL_TAG}"
     -t "${FINAL_TAG}" \
     "${PROJECT_ROOT}"
 
+# Tag latest if requested
+ALSO_LATEST="${ALSO_LATEST:-1}"
+if [[ "${ALSO_LATEST}" == "1" ]]; then
+    echo "[i] Tagging latest: ${LATEST_BASE} and ${LATEST_FINAL}"
+    "${DOCKER_BIN}" tag "${BASE_TAG}" "${LATEST_BASE}"
+    "${DOCKER_BIN}" tag "${FINAL_TAG}" "${LATEST_FINAL}"
+fi
+
 if [[ "${PUSH}" == "1" ]]; then
     echo "[+] Pushing ${BASE_TAG}"
     "${DOCKER_BIN}" push "${BASE_TAG}"
 
     echo "[+] Pushing ${FINAL_TAG}"
     "${DOCKER_BIN}" push "${FINAL_TAG}"
+    if [[ "${ALSO_LATEST}" == "1" ]]; then
+        echo "[+] Pushing ${LATEST_BASE}"
+        "${DOCKER_BIN}" push "${LATEST_BASE}"
+        echo "[+] Pushing ${LATEST_FINAL}"
+        "${DOCKER_BIN}" push "${LATEST_FINAL}"
+    fi
 else
     echo "[!] PUSH=0, skipping docker push."
 fi

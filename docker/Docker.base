@@ -5,6 +5,7 @@ FROM nvidia/cuda:${CUDA_VERSION}-cudnn8-runtime-ubuntu20.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG ALPHAFOLD_VERSION=v2.3.2
+ARG ALLOW_INSECURE_STEREO=0
 
 ENV TZ=Etc/UTC \
     ALPHAFOLD_DIR=/opt/alphafold \
@@ -24,6 +25,7 @@ RUN rm -f /etc/apt/sources.list.d/cuda* /etc/apt/sources.list.d/nvidia* || true 
         ca-certificates \
         cmake \
         curl \
+        rsync \
         git \
         hmmer \
         kalign \
@@ -48,6 +50,15 @@ RUN rm -f /etc/apt/sources.list.d/cuda* /etc/apt/sources.list.d/nvidia* || true 
 RUN --mount=type=secret,id=corpca,required=false,target=/usr/local/share/ca-certificates/corp-rootCA.crt \
     bash -lc 'if [ -f /usr/local/share/ca-certificates/corp-rootCA.crt ]; then update-ca-certificates; fi'
 
+# Statically include any CA certs placed in repo certs/ (use private registry)
+COPY certs /usr/local/share/corp-certs
+RUN bash -lc 'shopt -s nullglob; for f in /usr/local/share/corp-certs/*.crt /usr/local/share/corp-certs/*.pem; do \
+      cp -v "$f" /usr/local/share/ca-certificates/; \
+    done; update-ca-certificates || true'
+
+# Ensure Python requests prefers system CA bundle inside container
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
 # HH-suite (필수 바이너리) 설치
 RUN git clone --branch v3.3.0 --single-branch https://github.com/soedinglab/hh-suite.git /tmp/hh-suite && \
     mkdir /tmp/hh-suite/build && \
@@ -71,16 +82,21 @@ RUN wget -q -P /tmp https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-
 # Alphafold 소스 코드 및 종속 데이터 다운로드
 RUN git clone --branch ${ALPHAFOLD_VERSION} --depth 1 --single-branch https://github.com/google-deepmind/alphafold.git ${ALPHAFOLD_DIR} && \
     bash -lc 'set -e; dest="${ALPHAFOLD_DIR}/alphafold/common/stereo_chemical_props.txt"; \
+      cf="-fsSL --retry 5 --retry-delay 2"; \
+      if [ "${ALLOW_INSECURE_STEREO}" = "1" ]; then cf="$cf -k"; fi; \
       for url in \
         https://git.scicore.unibas.ch/schwede/openstructure/-/raw/7102c63615b64735c4941278d92b554ec94415f8/modules/mol/alg/src/stereo_chemical_props.txt \
         https://raw.githubusercontent.com/sokrypton/ColabFold/main/beta/stereo_chemical_props.txt \
         https://raw.githubusercontent.com/aqlaboratory/openfold/main/openfold/resources/stereo_chemical_props.txt; do \
         echo "[stereo_props] Trying $url"; \
-        if curl -fsSL --retry 5 --retry-delay 2 "$url" -o "$dest"; then echo "[stereo_props] Downloaded"; break; fi; \
+        if curl $cf "$url" -o "$dest"; then echo "[stereo_props] Downloaded"; break; fi; \
       done; test -s "$dest"'
 
 # Adjust SciPy pin for Python 3.10 compatibility (AlphaFold v2.3.2 pins 1.7.0)
 RUN sed -i 's/^scipy==1\.7\.0$/scipy==1.8.1/' ${ALPHAFOLD_DIR}/requirements.txt || true
+
+# Adjust pandas pin for Python 3.10 + NumPy ABI compatibility
+RUN sed -i 's/^pandas==1\.3\.4$/pandas==1.3.5/' ${ALPHAFOLD_DIR}/requirements.txt || true
 
 # Conda 기반 의존성 설치 (GPU 지원 OpenMM 포함)
 RUN ${CONDA_DIR}/bin/conda install -y -n ${CONDA_ENV} -c conda-forge \
@@ -93,9 +109,11 @@ RUN source ${CONDA_DIR}/bin/activate ${CONDA_ENV} && \
     pip install --upgrade pip && \
     pip install --no-cache-dir -r ${ALPHAFOLD_DIR}/requirements.txt && \
     pip install --no-cache-dir \
-        "jax==0.4.26" \
-        "jaxlib==0.4.26+cuda12.cudnn89" \
+        "jax==0.4.13" \
+        "jaxlib==0.4.13+cuda12.cudnn89" \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html && \
+    # Ensure NumPy < 2.0 for binary ABI compatibility with pandas C extensions
+    pip install --no-cache-dir "numpy>=1.22,<2.0" "pandas==1.5.3" && \
     pip install --no-cache-dir \
         dm-tree==0.1.8 \
         runpod && \

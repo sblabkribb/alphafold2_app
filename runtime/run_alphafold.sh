@@ -59,9 +59,18 @@ echo "    MODEL_PRESET=${MODEL_PRESET}"
 echo "    DB_PRESET=${DB_PRESET}"
 echo "    MAX_TEMPLATE_DATE=${MAX_TEMPLATE_DATE}"
 
-source "${VENV_PATH:-/opt/alphafold/venv}/bin/activate"
+# Prefer explicit python from conda env if available; fallback to python3
+PY_ENV_ROOT="${VENV_PATH:-/opt/conda/envs/alphafold}"
+if [[ -f "${PY_ENV_ROOT}/bin/activate" ]]; then
+    # shellcheck disable=SC1090
+    source "${PY_ENV_ROOT}/bin/activate" || true
+fi
+PY_BIN="${PY_BIN:-${PY_ENV_ROOT}/bin/python}"
+if [[ ! -x "${PY_BIN}" ]]; then
+    PY_BIN="python3"
+fi
 
-python "${ALPHAFOLD_DIR}/run_alphafold.py" \
+"${PY_BIN}" "${ALPHAFOLD_DIR}/run_alphafold.py" \
     --fasta_paths="${FASTA_PATH}" \
     --output_dir="${OUTPUT_DIR}" \
     --data_dir="${ALPHAFOLD_DB_PATH}" \

@@ -12,13 +12,16 @@ Behavior:
   - Prefers a persistent volume at ${RUNPOD_VOLUME_ROOT}/alphafold when present.
   - Ensures ${ALPHAFOLD_DB_PATH} points to the persistent location (makes a symlink if possible).
   - Downloads model parameters when missing.
+  - Optionally populates DBs if missing using DB_SYNC_CMD or download_db.sh.
 
 Environment variables:
-  RUNPOD_VOLUME_ROOT   Root mount for Runpod volume (default: /runpod-volume)
-  RUNPOD_DATA_DIR      Target dir on volume (default: ${RUNPOD_VOLUME_ROOT}/alphafold)
-  ALPHAFOLD_DB_PATH    Runtime data dir inside container (default: /data/alphafold)
-  MODEL_RELEASE_URL    Override model params tar URL
-  DB_SYNC_CMD          Optional command to populate databases when missing
+  RUNPOD_VOLUME_ROOT      Root mount for Runpod volume (default: /runpod-volume)
+  RUNPOD_DATA_DIR         Target dir on volume (default: ${RUNPOD_VOLUME_ROOT}/alphafold)
+  ALPHAFOLD_DB_PATH       Runtime data dir inside container (default: /data/alphafold)
+  MODEL_RELEASE_URL       Override model params tar URL
+  DB_SYNC_CMD             Optional command to populate databases when missing
+  ALLOW_DB_AUTO_DOWNLOAD  If '1', attempt to fetch DB when missing with download_db.sh (default: 0)
+  DB_AUTO_PRESET          Preset for auto-download: reduced_dbs|full_dbs (default: reduced_dbs)
 EOF
 }
 
@@ -81,7 +84,7 @@ fi
 # Ensure models exist; download if missing
 NEED_MODELS=1
 if [[ -d "${ALPHAFOLD_MODELS_DIR}" ]]; then
-  if find "${ALPHAFOLD_MODELS_DIR}" -type f -name "*.npz" -o -name "params*.bin" | head -n1 >/dev/null 2>&1; then
+  if find "${ALPHAFOLD_MODELS_DIR}" -type f \( -name "*.npz" -o -name "params*.bin" \) | head -n1 >/dev/null 2>&1; then
     NEED_MODELS=0
   fi
 fi
@@ -93,13 +96,7 @@ else
   echo "[BOOTSTRAP] Alphafold model params already present."
 fi
 
-echo "--- [BOOTSTRAP] Final sizes ---"
-du -sh "${ALPHAFOLD_DB_PATH}" 2>/dev/null || true
-du -sh "${ALPHAFOLD_MODELS_DIR}" 2>/dev/null || true
-
-echo "[BOOTSTRAP] Completed."
-
-# Optionally populate broader databases if missing and DB_SYNC_CMD is provided
+# Check core DB directories
 DB_DIRS=(bfd uniref90 mgnify pdb70 pdb_mmcif)
 MISSING_DB=0
 for d in "${DB_DIRS[@]}"; do
@@ -108,11 +105,27 @@ for d in "${DB_DIRS[@]}"; do
   fi
 done
 
-if [[ "${MISSING_DB}" == "1" && -n "${DB_SYNC_CMD:-}" ]]; then
-  echo "[BOOTSTRAP] Core databases missing; running DB_SYNC_CMD."
-  echo "DB_SYNC_CMD=${DB_SYNC_CMD}"
-  # shellcheck disable=SC2086
-  bash -lc ${DB_SYNC_CMD}
-  echo "--- [BOOTSTRAP] Post-sync sizes ---"
-  du -sh "${ALPHAFOLD_DB_PATH}" 2>/dev/null || true
+if [[ "${MISSING_DB}" == "1" ]]; then
+  if [[ -n "${DB_SYNC_CMD:-}" ]]; then
+    echo "[BOOTSTRAP] Core databases missing; running DB_SYNC_CMD."
+    echo "DB_SYNC_CMD=${DB_SYNC_CMD}"
+    # shellcheck disable=SC2086
+    bash -lc ${DB_SYNC_CMD}
+  elif [[ "${ALLOW_DB_AUTO_DOWNLOAD:-0}" == "1" ]]; then
+    PRESET="${DB_AUTO_PRESET:-reduced_dbs}"
+    echo "[BOOTSTRAP] Core databases missing; auto-download enabled. Preset=${PRESET}"
+    "/app/download_db.sh" "${ALPHAFOLD_DB_PATH}" "${PRESET}"
+  else
+    echo "[BOOTSTRAP] Core databases missing; no sync/download configured. Skipping."
+  fi
 fi
+
+echo "--- [BOOTSTRAP] Sizes ---"
+du -sh "${ALPHAFOLD_DB_PATH}" 2>/dev/null || true
+du -sh "${ALPHAFOLD_MODELS_DIR}" 2>/dev/null || true
+for d in "${DB_DIRS[@]}"; do
+  du -sh "${ALPHAFOLD_DB_PATH}/${d}" 2>/dev/null || true
+done
+
+echo "[BOOTSTRAP] Completed."
+

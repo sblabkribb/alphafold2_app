@@ -117,10 +117,114 @@ def _collect_outputs(output_dir: Path) -> Dict[str, Any]:
     return {"files": files, "archive_base64": archive_b64}
 
 
+def _spawn_background(cmd: list[str], env: Dict[str, str], log_path: Path) -> int:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "ab", buffering=0) as log:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env)
+    return proc.pid
+
+
+def _db_status(db_root: Path) -> Dict[str, Any]:
+    targets = [
+        "bfd",
+        "uniref90",
+        "mgnify",
+        "pdb_mmcif",
+        "pdb70",
+        "models",
+        "params",
+    ]
+    sizes: Dict[str, Any] = {}
+    for t in targets:
+        p = db_root / t
+        if p.exists():
+            try:
+                out = subprocess.check_output(["du", "-sh", str(p)], text=True).strip().split("\t")[0]
+            except Exception:
+                out = None
+            sizes[t] = {"exists": True, "size": out}
+        else:
+            sizes[t] = {"exists": False, "size": None}
+    procs = {}
+    for name in ("download_all_data.sh", "aria2c", "rsync"):
+        try:
+            out = subprocess.check_output(["bash", "-lc", f"pgrep -fa {name} || true"], text=True)
+        except Exception:
+            out = ""
+        procs[name] = [l.strip() for l in out.splitlines() if l.strip()]
+    try:
+        total = subprocess.check_output(["du", "-sh", str(db_root)], text=True).strip().split("\t")[0]
+    except Exception:
+        total = None
+    return {"root": str(db_root), "total": total, "dirs": sizes, "procs": procs}
+
+
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("Received event: %s", json.dumps(event)[:512])
 
     input_payload: Dict[str, Any] = event.get("input") or {}
+
+    # Action mode: allow service-triggered DB bootstrap/preload and status checks
+    action = input_payload.get("action")
+    if action:
+        ALPHAFOLD_DB_PATH = Path(os.environ.get("ALPHAFOLD_DB_PATH", "/data/alphafold"))
+        RUNPOD_VOLUME_ROOT = Path(os.environ.get("RUNPOD_VOLUME_ROOT", "/runpod-volume"))
+        data_dir = ALPHAFOLD_DB_PATH
+        if RUNPOD_VOLUME_ROOT.exists():
+            # In our bootstrap we symlink /data/alphafold -> /runpod-volume/alphafold
+            pass
+
+        if action in {"status", "diagnose"}:
+            return {
+                "status": "ok",
+                "mode": action,
+                "db": _db_status(data_dir),
+            }
+
+        if action == "stop":
+            stopped = {}
+            for name in ("download_all_data.sh", "bootstrap_db.sh", "aria2c"):
+                try:
+                    out = subprocess.check_output(["bash", "-lc", f"pgrep -fa {name} || true"], text=True)
+                    pids = []
+                    for line in out.splitlines():
+                        if not line.strip():
+                            continue
+                        pid = int(line.split()[0])
+                        subprocess.run(["kill", str(pid)], check=False)
+                        pids.append(pid)
+                    stopped[name] = pids
+                except Exception as e:
+                    stopped[name] = {"error": str(e)}
+            return {"status": "ok", "mode": "stop", "stopped": stopped}
+
+        if action == "preload":
+            preset = input_payload.get("preset") or os.environ.get("DB_AUTO_PRESET", "reduced_dbs")
+            allow_download = input_payload.get("allow_download", True)
+            tar_opts = input_payload.get("tar_options") or os.environ.get("TAR_OPTIONS", "--no-same-owner --skip-old-files")
+            log_path = Path(input_payload.get("log_path") or (data_dir / ("bootstrap_" + preset + ".log")))
+            env = os.environ.copy()
+            if allow_download:
+                env["ALLOW_DB_AUTO_DOWNLOAD"] = "1"
+            env["DB_AUTO_PRESET"] = preset
+            env["TAR_OPTIONS"] = tar_opts
+            # Ensure single downloader via flock
+            cmd = [
+                "bash",
+                "-lc",
+                f"flock -n {str(data_dir)}/.dl.lock -c '/app/bootstrap_db.sh --diagnose'",
+            ]
+            pid = _spawn_background(cmd, env, log_path)
+            return {
+                "status": "started",
+                "mode": "preload",
+                "preset": preset,
+                "pid": pid,
+                "log": str(log_path),
+                "db": _db_status(data_dir),
+            }
+
+        return {"status": "error", "message": f"Unknown action: {action}"}
 
     with tempfile.TemporaryDirectory(prefix="alphafold-input-") as working_dir_str:
         working_dir = Path(working_dir_str)
