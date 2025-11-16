@@ -155,6 +155,14 @@ python client\control.py status --verify 'C:\\Users\\user\\Documents\\GitHub\\al
     export MODEL_PRESET=multimer
     /app/run_alphafold.sh /app/sample_data/multimer_sample.fasta /workspace/af_out_multimer
     ```
+- Serverless 요청 예시
+  ```bash
+  # 모노머
+  python client/submit_job.py --sequence-file sample_data/sequence.fasta --model-preset monomer --db-preset full_dbs
+
+  # 멀티머
+  python client/submit_job.py --sequence-file sample_data/multimer_sample.fasta --model-preset multimer --db-preset full_dbs
+  ```
 
 ## Image notes
 - Adjusted SciPy(1.8.1) and pandas(1.3.5) pins for Python 3.10 compatibility.
