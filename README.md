@@ -101,13 +101,15 @@ bash -x /app/run_alphafold.sh ... 2>&1 | tee /workspace/af_out/run.log
 python client/submit_job.py \
   --sequence-file sample_data/sequence.fasta \
   --model-preset monomer \
-  --db-preset full_dbs
+  --db-preset full_dbs \
+  # --insecure (인증서 검증 비활성화, 필요 시) \
 
 # 멀티머
 python client/submit_job.py \
   --sequence-file sample_data/multimer_sample.fasta \
   --model-preset multimer \
-  --db-preset full_dbs
+  --db-preset full_dbs \
+  # --insecure (인증서 검증 비활성화, 필요 시) \
 ```
 
 `RETURN_ARCHIVE=1` 로 설정했다면 작업 완료 시 압축 파일(base64)도 함께 반환됩니다.
