@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Dict, Any
 
@@ -293,6 +294,16 @@ def _run_local(fasta_path: str):
     print(json.dumps(result, indent=2))
 
 
+def _idle_forever():
+    """Keep the pod process alive when RUN_MODE=pod."""
+    logger.info("[POD] RUN_MODE=pod; entering idle loop. Press Ctrl+C to exit.")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        logger.info("[POD] Idle loop interrupted; exiting.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="RunPod Alphafold handler entrypoint")
     parser.add_argument("--self-test", action="store_true", help="Run internal checks and exit.")
@@ -312,6 +323,11 @@ def main():
         _init_once()
     except Exception as e:
         logger.warning("[INIT] Bootstrap failed: %s", e)
+
+    run_mode = os.environ.get("RUN_MODE", "serverless").lower()
+    if run_mode == "pod":
+        _idle_forever()
+        return
 
     runpod.serverless.start({"handler": handler})
 

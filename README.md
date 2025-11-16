@@ -121,6 +121,18 @@ python client\control.py status --verify 'C:\\Users\\user\\Documents\\GitHub\\al
 - 서버리스 프리로드가 중단됨: 워커 수명 때문에 중단될 수 있습니다. On‑Demand Pod에서 동일 볼륨에 선로딩 권장.
 - 중복 다운로드 정리: `pgrep -fa 'download_all_data.sh|aria2c|rsync'` → PPID=1 고아 aria2c는 종료.
 
+### Pod 모드 환경 변수
+- RunPod Pod에서 이 이미지를 사용할 때는 `RUN_MODE=pod`를 함께 지정해 handler가 serverless 워커를 띄우지 않고 대기 상태로 유지되도록 합니다.
+- 권장 환경 변수
+  ```
+  RUN_MODE=pod
+  RUNPOD_VOLUME_ROOT=/workspace
+  RUNPOD_DATA_DIR=/workspace/alphafold
+  ALPHAFOLD_DB_PATH=/workspace/alphafold
+  ALPHAFOLD_DIR=/workspace/alphafold_src
+  ```
+- Pod에 SSH 접속한 뒤 위 값을 `export` 하면 `/workspace` 네트워크 볼륨을 serverless와 동일하게 공유할 수 있습니다.
+
 ## Image notes
 - Adjusted SciPy(1.8.1) and pandas(1.3.5) pins for Python 3.10 compatibility.
 - Stereo chemical properties file fetched from multiple mirrors for robustness.

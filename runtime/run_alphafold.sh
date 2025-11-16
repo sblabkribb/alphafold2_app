@@ -130,49 +130,62 @@ if [[ ${#MODEL_FLAG[@]} -gt 0 ]]; then
     CMD+=("${MODEL_FLAG[@]}")
 fi
 
-UNIREF90_PATH="${UNIREF90_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/uniref90/uniref90.fasta" "${ALPHAFOLD_DB_PATH}/uniref90/"*.fasta)}"
+UNIREF90_PATH="${UNIREF90_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/uniref90/uniref90.fasta" "${ALPHAFOLD_DB_PATH}/uniref90/"*.fasta || true)}"
 require_path "--uniref90_database_path" "${UNIREF90_PATH}"
 CMD+=("--uniref90_database_path=${UNIREF90_PATH}")
 
-MGNIFY_PATH="${MGNIFY_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/mgnify/"*.fa "${ALPHAFOLD_DB_PATH}/mgnify/"*.fasta)}"
+MGNIFY_PATH="${MGNIFY_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/mgnify/"*.fa "${ALPHAFOLD_DB_PATH}/mgnify/"*.fasta || true)}"
 require_path "--mgnify_database_path" "${MGNIFY_PATH}"
 CMD+=("--mgnify_database_path=${MGNIFY_PATH}")
 
-TEMPLATE_MMCIF_DIR="${TEMPLATE_MMCIF_DIR:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/pdb_mmcif/mmcif_files")}"
+TEMPLATE_MMCIF_DIR="${TEMPLATE_MMCIF_DIR:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/pdb_mmcif/mmcif_files" || true)}"
 require_path "--template_mmcif_dir" "${TEMPLATE_MMCIF_DIR}"
 CMD+=("--template_mmcif_dir=${TEMPLATE_MMCIF_DIR}")
 
-OBSOLETE_PDBS_PATH="${OBSOLETE_PDBS_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/pdb_mmcif/obsolete.dat")}"
+OBSOLETE_PDBS_PATH="${OBSOLETE_PDBS_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/pdb_mmcif/obsolete.dat" || true)}"
 require_path "--obsolete_pdbs_path" "${OBSOLETE_PDBS_PATH}"
 CMD+=("--obsolete_pdbs_path=${OBSOLETE_PDBS_PATH}")
 
-PDB70_PATH="${PDB70_DATABASE_PATH:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/pdb70/pdb70")}"
-if [[ -n "${PDB70_PATH}" ]]; then
+PDB70_PATH="${PDB70_DATABASE_PATH:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/pdb70/pdb70" || true)}"
+
+UNIPROT_PATH="${UNIPROT_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/uniprot/uniprot.fasta" "${ALPHAFOLD_DB_PATH}/uniprot/"*.fasta || true)}"
+
+PDB_SEQRES_PATH="${PDB_SEQRES_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/pdb_seqres/pdb_seqres.txt" || true)}"
+
+if [[ "${MODEL_PRESET}" == "multimer" ]]; then
+    require_path "--uniprot_database_path" "${UNIPROT_PATH}"
+    CMD+=("--uniprot_database_path=${UNIPROT_PATH}")
+    require_path "--pdb_seqres_database_path" "${PDB_SEQRES_PATH}"
+    CMD+=("--pdb_seqres_database_path=${PDB_SEQRES_PATH}")
+else
+    require_path "--pdb70_database_path" "${PDB70_PATH}"
     CMD+=("--pdb70_database_path=${PDB70_PATH}")
 fi
 
-UNIPROT_PATH="${UNIPROT_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/uniprot/uniprot.fasta" "${ALPHAFOLD_DB_PATH}/uniprot/"*.fasta)}"
-if [[ -n "${UNIPROT_PATH}" ]]; then
-    CMD+=("--uniprot_database_path=${UNIPROT_PATH}")
-fi
-
-PDB_SEQRES_PATH="${PDB_SEQRES_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/pdb_seqres/pdb_seqres.txt")}"
-if [[ -n "${PDB_SEQRES_PATH}" ]]; then
-    CMD+=("--pdb_seqres_database_path=${PDB_SEQRES_PATH}")
-fi
-
-BFD_PATH="${BFD_DATABASE_PATH:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt" "${ALPHAFOLD_DB_PATH}/bfd/"*)}"
+BFD_PATH="${BFD_DATABASE_PATH:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt" "${ALPHAFOLD_DB_PATH}/bfd/"* || true)}"
 if [[ -n "${BFD_PATH}" ]]; then
+    if [[ -d "${BFD_PATH}" ]]; then
+        BFD_PREFIX="${BFD_PATH}/$(basename "${BFD_PATH}")"
+        if compgen -G "${BFD_PREFIX}_*" > /dev/null; then
+            BFD_PATH="${BFD_PREFIX}"
+        fi
+    fi
     CMD+=("--bfd_database_path=${BFD_PATH}")
 fi
 
-SMALL_BFD_PATH="${SMALL_BFD_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/small_bfd/bfd-first_non_consensus_sequences.fasta" "${ALPHAFOLD_DB_PATH}/small_bfd/"*.fasta)}"
+SMALL_BFD_PATH="${SMALL_BFD_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/small_bfd/bfd-first_non_consensus_sequences.fasta" "${ALPHAFOLD_DB_PATH}/small_bfd/"*.fasta || true)}"
 if [[ -n "${SMALL_BFD_PATH}" ]]; then
     CMD+=("--small_bfd_database_path=${SMALL_BFD_PATH}")
 fi
 
-UNIREF30_PATH="${UNIREF30_DATABASE_PATH:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/uniref30/UniRef30_20"* "${ALPHAFOLD_DB_PATH}/uniref30/"*)}"
+UNIREF30_PATH="${UNIREF30_DATABASE_PATH:-$(resolve_path dir "${ALPHAFOLD_DB_PATH}/uniref30/UniRef30_20"* "${ALPHAFOLD_DB_PATH}/uniref30/"* || true)}"
 if [[ -n "${UNIREF30_PATH}" ]]; then
+    if [[ -d "${UNIREF30_PATH}" ]]; then
+        UNIREF30_PREFIX="${UNIREF30_PATH}/$(basename "${UNIREF30_PATH}")"
+        if compgen -G "${UNIREF30_PREFIX}_*" > /dev/null; then
+            UNIREF30_PATH="${UNIREF30_PREFIX}"
+        fi
+    fi
     CMD+=("--uniref30_database_path=${UNIREF30_PATH}")
 fi
 
