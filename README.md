@@ -133,6 +133,29 @@ python client\control.py status --verify 'C:\\Users\\user\\Documents\\GitHub\\al
   ```
 - Pod에 SSH 접속한 뒤 위 값을 `export` 하면 `/workspace` 네트워크 볼륨을 serverless와 동일하게 공유할 수 있습니다.
 
+### 모델 프리셋별 주의사항
+- `MODEL_PRESET=monomer` : `pdb70`, `bfd`, `uniref90`, `mgnify`, `uniref30` 등이 필요하며 `pdb_seqres` 는 전달하면 안 됩니다. (스크립트가 자동으로 `pdb70` 만 넘깁니다.)
+- `MODEL_PRESET=multimer` : `pdb_seqres`, `uniprot`, `bfd`, `uniref90`, `mgnify`, `uniref30` 이 필요하고 `pdb70` 은 사용하지 않습니다.
+- 실행 예
+  ```bash
+  # Monomer
+  export MODEL_PRESET=monomer
+  /app/run_alphafold.sh /app/sample_data/sequence.fasta /workspace/af_out
+
+  # Multimer
+  export MODEL_PRESET=multimer
+  /app/run_alphafold.sh /app/sample_data/sequence.fasta /workspace/af_out_multimer
+  ```
+- 로컬 테스트용 FASTA
+  - 모노머: `/app/sample_data/sequence.fasta`
+  - 멀티머: `/app/sample_data/multimer_sample.fasta` (chainA/chainB 두 서열 포함)
+  - 예시 실행
+    ```bash
+    # 멀티머 테스트 (Pod/온디맨드)
+    export MODEL_PRESET=multimer
+    /app/run_alphafold.sh /app/sample_data/multimer_sample.fasta /workspace/af_out_multimer
+    ```
+
 ## Image notes
 - Adjusted SciPy(1.8.1) and pandas(1.3.5) pins for Python 3.10 compatibility.
 - Stereo chemical properties file fetched from multiple mirrors for robustness.
