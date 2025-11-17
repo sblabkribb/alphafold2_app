@@ -1,4 +1,4 @@
-# Alphafold2 RunPod 가이드 (한국어 요약)
+# Alphafold2 RunPod 가이드
 
 이 리포지토리는 RunPod Serverless / Pod 환경에서 Alphafold2 를 실행하기 위한 컨테이너, 스크립트, 샘플 클라이언트를 제공합니다. 아래 내용을 순서대로 따라 하면 됩니다.
 
