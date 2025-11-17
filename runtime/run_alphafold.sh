@@ -173,7 +173,10 @@ if [[ -n "${BFD_PATH}" ]]; then
     CMD+=("--bfd_database_path=${BFD_PATH}")
 fi
 
-SMALL_BFD_PATH="${SMALL_BFD_DATABASE_PATH:-$(resolve_path file "${ALPHAFOLD_DB_PATH}/small_bfd/bfd-first_non_consensus_sequences.fasta" "${ALPHAFOLD_DB_PATH}/small_bfd/"*.fasta || true)}"
+SMALL_BFD_PATH="${SMALL_BFD_DATABASE_PATH:-}"
+if [[ -z "${SMALL_BFD_PATH}" && "${DB_PRESET}" != "full_dbs" ]]; then
+    SMALL_BFD_PATH="$(resolve_path file "${ALPHAFOLD_DB_PATH}/small_bfd/bfd-first_non_consensus_sequences.fasta" "${ALPHAFOLD_DB_PATH}/small_bfd/"*.fasta || true)"
+fi
 if [[ -n "${SMALL_BFD_PATH}" ]]; then
     CMD+=("--small_bfd_database_path=${SMALL_BFD_PATH}")
 fi

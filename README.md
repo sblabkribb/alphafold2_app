@@ -26,10 +26,22 @@
    DB_AUTO_PRESET=full_dbs
    RUNPOD_VOLUME_ROOT=/runpod-volume
    ALPHAFOLD_DB_PATH=/runpod-volume/alphafold
+   ALPHAFOLD_MODELS_DIR=/runpod-volume/alphafold/models
    RUNPOD_HANDLER=handler.handler
    RETURN_ARCHIVE=1
    LOG_LEVEL=DEBUG
    ```
+   > **DB 파일 경로를 명시해야 하는 경우**
+   > 기본적으로 `run_alphafold.sh`가 모든 경로를 자동으로 찾지만, 디렉터리 구조가 달라 hhsearch/bfd 관련 오류가 뜬다면 아래 환경 변수로 정확한 파일/프리픽스를 지정해 주세요.
+> ```
+> PDB70_DATABASE_PATH=/runpod-volume/alphafold/pdb70/pdb70
+> BFD_DATABASE_PATH=/runpod-volume/alphafold/bfd/bfd_metaclust_clu_complete_id30_c90_final_seq.sorted_opt
+> UNIREF30_DATABASE_PATH=/runpod-volume/alphafold/uniref30/UniRef30_2023_02
+> UNIPROT_DATABASE_PATH=/runpod-volume/alphafold/uniprot/uniprot.fasta
+> PDB_SEQRES_DATABASE_PATH=/runpod-volume/alphafold/pdb_seqres/pdb_seqres.txt
+> ```
+> 멀티머 모드가 아니라면 `UNIPROT/PDB_SEQRES`는 생략해도 됩니다.  
+> `reduced_dbs` 프리셋을 사용할 때만 `SMALL_BFD_DATABASE_PATH=/runpod-volume/alphafold/small_bfd/bfd-first_non_consensus_sequences.fasta` 를 지정하고, `full_dbs`에서는 **설정하지 마세요.**
 
 4. **Pod 모드 환경 변수** (네트워크 스토리지를 `/workspace` 로 마운트했다는 가정)
    ```
