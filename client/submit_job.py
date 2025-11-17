@@ -54,7 +54,11 @@ def _resolve_verify(ca_bundle: Optional[str], append_certifi: bool) -> Any:
 
 def build_payload(args: argparse.Namespace) -> Dict[str, Any]:
     payload: Dict[str, Any] = {}
-    if args.sequence_file:
+    if args.fasta_dir:
+        payload["fasta_dir"] = str(Path(args.fasta_dir).expanduser())
+    elif args.fasta_path:
+        payload["fasta_paths"] = [str(Path(p).expanduser()) for p in args.fasta_path]
+    elif args.sequence_file:
         payload["sequence"] = _read_sequence_from_fasta(Path(args.sequence_file))
     elif args.sequence:
         payload["sequence"] = args.sequence.strip()
@@ -109,14 +113,34 @@ def poll_job(api_key: str, endpoint_id: str, job_id: str, verify: Any, interval:
         time.sleep(interval)
 
 
-def save_archive(output: Dict[str, Any], destination: Path) -> None:
-    archive_b64 = output.get("archive_base64")
-    if not archive_b64:
-        print("[!] No archive provided in response, skipping download.")
+def save_archives(output: Dict[str, Any], destination: Path) -> None:
+    archives = output.get("archives") or []
+    if not archives:
+        archive_b64 = output.get("archive_base64")
+        if not archive_b64:
+            print("[!] No archive provided in response, skipping download.")
+            return
+        archives = [{"name": destination.name, "base64": archive_b64}]
+
+    if len(archives) == 1:
+        target_path = destination
+        data = base64.b64decode(archives[0]["base64"])
+        target_path.write_bytes(data)
+        print(f"[+] Saved archive to {target_path}")
         return
-    data = base64.b64decode(archive_b64)
-    destination.write_bytes(data)
-    print(f"[+] Saved archive to {destination}")
+
+    if destination.suffix:
+        target_dir = destination.with_suffix("")
+    else:
+        target_dir = destination
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for archive in archives:
+        name = archive.get("name") or f"{time.time_ns()}.tar.gz"
+        data = base64.b64decode(archive["base64"])
+        path = target_dir / name
+        path.write_bytes(data)
+        print(f"[+] Saved archive to {path}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,6 +148,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sequence-file", help="Path to FASTA file to read")
     parser.add_argument("--sequence", help="Raw amino acid sequence")
     parser.add_argument("--fasta-url", help="Public FASTA URL")
+    parser.add_argument("--fasta-dir", help="Directory containing multiple FASTA files")
+    parser.add_argument("--fasta-path", action="append", dest="fasta_path", help="FASTA file path (repeatable)")
     parser.add_argument("--endpoint", default=os.environ.get("RUNPOD_ENDPOINT_ID"), help="RunPod endpoint ID")
     parser.add_argument("--api-key", default=os.environ.get("RUNPOD_API_KEY"), help="RunPod API key")
     parser.add_argument("--model-preset", default="monomer")
@@ -160,7 +186,7 @@ def main() -> None:
         print(json.dumps(result, indent=2, ensure_ascii=False))
         output = result.get("output") or {}
         if output:
-            save_archive(output, args.save_archive)
+            save_archives(output, args.save_archive)
         return
 
     payload = build_payload(args)
@@ -177,7 +203,7 @@ def main() -> None:
 
     output = result.get("output") or {}
     if output:
-        save_archive(output, args.save_archive)
+        save_archives(output, args.save_archive)
 
 
 if __name__ == "__main__":  # pragma: no cover

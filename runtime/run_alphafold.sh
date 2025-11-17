@@ -24,8 +24,26 @@ if [[ $# -lt 2 ]]; then
     exit 1
 fi
 
-FASTA_PATH="$(realpath "$1")"
+FASTA_INPUT="$1"
 OUTPUT_DIR="$(realpath "$2")"
+
+FASTA_PATHS=""
+if [[ -d "${FASTA_INPUT}" ]]; then
+    FASTA_DIR="$(realpath "${FASTA_INPUT}")"
+    mapfile -t FASTA_FILES < <(find "${FASTA_DIR}" -maxdepth 1 -type f \( -iname "*.fa" -o -iname "*.fasta" -o -iname "*.faa" -o -iname "*.fas" \) | sort)
+    if [[ ${#FASTA_FILES[@]} -eq 0 ]]; then
+        echo "No FASTA files found in directory: ${FASTA_DIR}" >&2
+        exit 2
+    fi
+    FASTA_PATHS=$(IFS=,; printf "%s" "${FASTA_FILES[*]}")
+elif [[ -f "${FASTA_INPUT}" ]]; then
+    FASTA_PATHS="$(realpath "${FASTA_INPUT}")"
+elif [[ "${FASTA_INPUT}" == *,* ]]; then
+    FASTA_PATHS="${FASTA_INPUT}"
+else
+    echo "FASTA input must be a file, directory containing FASTA files, or comma-separated list of FASTA paths." >&2
+    exit 2
+fi
 
 ALPHAFOLD_DIR="${ALPHAFOLD_DIR:-/opt/alphafold}"
 ALPHAFOLD_DB_PATH="${ALPHAFOLD_DB_PATH:-}"
@@ -34,11 +52,6 @@ MODEL_PRESET="${MODEL_PRESET:-monomer}"
 DB_PRESET="${DB_PRESET:-full_dbs}"
 MAX_TEMPLATE_DATE="${MAX_TEMPLATE_DATE:-2020-05-14}"
 ALPHAFOLD_EXTRA_FLAGS="${ALPHAFOLD_EXTRA_FLAGS:-}"
-
-if [[ ! -f "${FASTA_PATH}" ]]; then
-    echo "FASTA file not found: ${FASTA_PATH}" >&2
-    exit 2
-fi
 
 if [[ -z "${ALPHAFOLD_DB_PATH}" ]]; then
     echo "Environment variable ALPHAFOLD_DB_PATH must be set." >&2
@@ -53,7 +66,7 @@ fi
 mkdir -p "${OUTPUT_DIR}"
 
 echo "[+] Running Alphafold:"
-echo "    FASTA_PATH=${FASTA_PATH}"
+echo "    FASTA_PATHS=${FASTA_PATHS}"
 echo "    OUTPUT_DIR=${OUTPUT_DIR}"
 echo "    MODEL_PRESET=${MODEL_PRESET}"
 echo "    DB_PRESET=${DB_PRESET}"
@@ -118,7 +131,7 @@ fi
 CMD=(
     "${PY_BIN}"
     "${ALPHAFOLD_DIR}/run_alphafold.py"
-    "--fasta_paths=${FASTA_PATH}"
+    "--fasta_paths=${FASTA_PATHS}"
     "--output_dir=${OUTPUT_DIR}"
     "--data_dir=${ALPHAFOLD_DB_PATH}"
     "--model_preset=${MODEL_PRESET}"

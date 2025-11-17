@@ -5,10 +5,11 @@ import logging
 import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Iterable, List
 
 import runpod
 import requests
@@ -17,6 +18,16 @@ logger = logging.getLogger("alphafold.handler")
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 
 _INITIALIZED = False
+_FASTA_EXTENSIONS = (".fa", ".fasta", ".faa", ".fas")
+_DEFAULT_ARCHIVE_PATTERNS = [
+    "ranked_*.pdb",
+    "relaxed_model_*_pred_0.pdb",
+    "ranking_debug.json",
+    "relax_metrics.json",
+    "timings.json",
+    "plddt.*",
+    "pae*",
+]
 
 
 def _run_script(cmd: list[str]) -> str:
@@ -74,7 +85,23 @@ def _download_fasta(url: str, target_path: Path) -> Path:
     return target_path
 
 
-def _prepare_fasta(input_payload: Dict[str, Any], working_dir: Path) -> Path:
+def _is_fasta_file(path: Path) -> bool:
+    return path.suffix.lower() in _FASTA_EXTENSIONS
+
+
+def _copy_fasta_files(source_files: Iterable[Path], destination_dir: Path) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for src in source_files:
+        if src.is_file() and _is_fasta_file(src):
+            shutil.copy2(src, destination_dir / src.name)
+            copied += 1
+    if copied == 0:
+        raise ValueError(f"No FASTA files found to copy into {destination_dir}")
+    return destination_dir
+
+
+def _prepare_fasta_inputs(input_payload: Dict[str, Any], working_dir: Path) -> Path:
     if "fasta_path" in input_payload:
         original = Path(input_payload["fasta_path"]).expanduser()
         if not original.is_file():
@@ -82,6 +109,33 @@ def _prepare_fasta(input_payload: Dict[str, Any], working_dir: Path) -> Path:
         destination = working_dir / original.name
         shutil.copy2(original, destination)
         return destination
+
+    if "fasta_paths" in input_payload:
+        paths = input_payload["fasta_paths"]
+        if not isinstance(paths, list) or not paths:
+            raise ValueError("fasta_paths must be a non-empty list of file paths.")
+        expanded = [Path(p).expanduser() for p in paths]
+        missing = [str(p) for p in expanded if not p.is_file()]
+        if missing:
+            raise FileNotFoundError(f"FASTA paths not found: {', '.join(missing)}")
+        return _copy_fasta_files(expanded, working_dir / "batch_fasta")
+
+    if "fasta_dir" in input_payload:
+        source_dir = Path(input_payload["fasta_dir"]).expanduser()
+        if not source_dir.is_dir():
+            raise NotADirectoryError(f"FASTA directory not found: {source_dir}")
+        return _copy_fasta_files(sorted(source_dir.iterdir()), working_dir / source_dir.name)
+
+    if "sequence_list" in input_payload:
+        sequence_list = input_payload["sequence_list"]
+        if not isinstance(sequence_list, list) or not sequence_list:
+            raise ValueError("sequence_list must be a non-empty list of sequences.")
+        batch_dir = working_dir / "batch_sequences"
+        for idx, seq in enumerate(sequence_list, start=1):
+            if not isinstance(seq, str) or not seq.strip():
+                raise ValueError("Each sequence in sequence_list must be a non-empty string.")
+            _write_fasta_from_sequence(seq, batch_dir / f"sequence_{idx}.fasta")
+        return batch_dir
 
     if "sequence" in input_payload:
         sequence = input_payload["sequence"]
@@ -92,7 +146,56 @@ def _prepare_fasta(input_payload: Dict[str, Any], working_dir: Path) -> Path:
     if "fasta_url" in input_payload:
         return _download_fasta(input_payload["fasta_url"], working_dir / "input.fasta")
 
-    raise ValueError("Input must include one of 'sequence', 'fasta_path', or 'fasta_url'.")
+    raise ValueError(
+        "Input must include one of 'sequence', 'sequence_list', 'fasta_path', "
+        "'fasta_paths', 'fasta_dir', or 'fasta_url'."
+    )
+
+
+def _archive_selected_outputs(target_dir: Path) -> str | None:
+    pattern_str = os.environ.get("ARCHIVE_PATTERNS")
+    if pattern_str:
+        patterns = [p.strip() for p in pattern_str.split(",") if p.strip()]
+    else:
+        patterns = _DEFAULT_ARCHIVE_PATTERNS
+
+    matches: List[Path] = []
+    seen: set[Path] = set()
+    for pattern in patterns:
+        for match in target_dir.glob(pattern):
+            rel = match.relative_to(target_dir)
+            if rel not in seen:
+                matches.append(match)
+                seen.add(rel)
+
+    if not matches:
+        return None
+
+    archive_path = target_dir / "results.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tar:
+        for match in matches:
+            tar.add(match, arcname=str(match.relative_to(target_dir)))
+
+    archive_b64 = base64.b64encode(archive_path.read_bytes()).decode("ascii")
+    archive_path.unlink(missing_ok=True)
+    return archive_b64
+
+
+def _prepare_archives(output_dir: Path) -> List[Dict[str, str]]:
+    archives: List[Dict[str, str]] = []
+    candidates = [p for p in sorted(output_dir.iterdir()) if p.is_dir()]
+    if not candidates:
+        candidates = [output_dir]
+    for target in candidates:
+        archive_b64 = _archive_selected_outputs(target)
+        if archive_b64:
+            archives.append(
+                {
+                    "name": f"{target.name}.tar.gz",
+                    "base64": archive_b64,
+                }
+            )
+    return archives
 
 
 def _collect_outputs(output_dir: Path) -> Dict[str, Any]:
@@ -105,17 +208,15 @@ def _collect_outputs(output_dir: Path) -> Dict[str, Any]:
                     "size": file_path.stat().st_size,
                 }
             )
-    archive_b64 = None
+    archives: List[Dict[str, str]] = []
     if os.environ.get("RETURN_ARCHIVE", "1") == "1":
-        archive_path = shutil.make_archive(
-            base_name=str(output_dir / "results"),
-            format="gztar",
-            root_dir=output_dir,
-        )
-        archive_file = Path(archive_path)
-        archive_b64 = base64.b64encode(archive_file.read_bytes()).decode("ascii")
-        archive_file.unlink(missing_ok=True)
-    return {"files": files, "archive_base64": archive_b64}
+        archives = _prepare_archives(output_dir)
+    result: Dict[str, Any] = {"files": files}
+    if archives:
+        result["archives"] = archives
+        if len(archives) == 1:
+            result["archive_base64"] = archives[0]["base64"]
+    return result
 
 
 def _spawn_background(cmd: list[str], env: Dict[str, str], log_path: Path) -> int:
@@ -229,7 +330,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
 
     with tempfile.TemporaryDirectory(prefix="alphafold-input-") as working_dir_str:
         working_dir = Path(working_dir_str)
-        fasta_path = _prepare_fasta(input_payload, working_dir)
+        fasta_input = _prepare_fasta_inputs(input_payload, working_dir)
 
         output_dir = Path(
             input_payload.get("output_dir")
@@ -250,7 +351,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         command = [
             "/bin/bash",
             "/app/run_alphafold.sh",
-            str(fasta_path),
+            str(fasta_input),
             str(output_dir),
         ]
 

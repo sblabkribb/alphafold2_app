@@ -3,6 +3,11 @@
 이 리포지토리는 RunPod Serverless / Pod 환경에서 Alphafold2 를 실행하기 위한 컨테이너, 스크립트, 샘플 클라이언트를 제공합니다. 아래 내용을 순서대로 따라 하면 됩니다.
 
 ---
+## 0. 주의 사항!!
+- Batch jobs must use the same MODEL_PRESET (monomer or multimer). Run separate submissions if you need both.
+
+- Batch runtime grows roughly linearly with the number of FASTA files. Keep batch size moderate and raise the client/server timeout when needed.
+---
 
 ## 1. 사전 준비
 
@@ -122,6 +127,23 @@ python client/submit_job.py \
   --model-preset multimer \
   --db-preset full_dbs \
   # --insecure (인증서 검증 비활성화, 필요 시) \
+
+# 디렉터리 전체 (예시)
+python client/submit_job.py \
+  --fasta-dir sample_data/multimer_batch \
+  --model-preset multimer \
+  --db-preset full_dbs \
+  --save-archive multimer_batch_results.tar.gz
+   # --insecure (인증서 검증 비활성화, 필요 시) \
+
+# 파일 여러 개 (예시)
+python client/submit_job.py \
+  --fasta-path data/a.fasta \
+  --fasta-path data/b.fasta \
+  --model-preset multimer \
+  --db-preset full_dbs
+# --insecure (인증서 검증 비활성화, 필요 시) \  
+
 ```
 
 `RETURN_ARCHIVE=1` 로 설정했다면 작업 완료 시 압축 파일(base64)도 함께 반환됩니다.
@@ -147,3 +169,17 @@ python client/submit_job.py \
 - Serverless 로그는 RunPod 대시보드 → Endpoints → Jobs 에서 확인하거나 `python client/submit_job.py --status <job-id>` 로 받아볼 수 있습니다.
 
 필요 시 이 README 를 참고해 모노머/멀티머 워크플로를 구성하십시오.
+
+
+
+## 7. Batch 입력/결과 관리 메모
+
+- 동일한 `MODEL_PRESET`(monomer 또는 multimer)끼리만 한 배치로 제출하세요. 다른 preset을 섞으면 잘못된 파이프라인으로 실행됩니다.
+- `client/submit_job.py` 는 `--fasta-dir` 또는 반복 가능한 `--fasta-path` 옵션으로 여러 FASTA를 한 번에 보낼 수 있습니다.
+- 런타임은 FASTA별 서브 디렉터리를 만들어 `ARCHIVE_PATTERNS`(기본: ranked/relaxed/metrics/timings/plddt/pae) 에 해당하는 파일만 각 FASTA 이름의 tar.gz로 반환합니다.
+- 멀티머처럼 결과가 커서 32MB 한도를 넘을 수 있는 작업은 `RETURN_ARCHIVE=0`으로 설정하고 `/outputs` 를 `/runpod-volume/...` 으로 복사하거나 외부 스토리지에 업로드한 뒤 링크만 응답에 포함하는 방식을 권장합니다.
+
+
+
+
+
