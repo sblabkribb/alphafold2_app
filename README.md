@@ -113,44 +113,25 @@ bash -x /app/run_alphafold.sh ... 2>&1 | tee /workspace/af_out/run.log
 
 ## 4. Serverless 요청 방법
 
-모든 DB가 `/runpod-volume/alphafold` 에 준비되어 있다는 가정 하에 아래 명령으로 요청합니다.
+모든 DB가 `/runpod-volume/alphafold` 에 준비돼 있다면 아래 예시처럼 요청합니다.
 
 ```bash
-# 모노머
-python client/submit_job.py \
-  --sequence-file sample_data/sequence.fasta \
-  --model-preset monomer \
-  --db-preset full_dbs \
-  # --insecure (인증서 검증 비활성화, 필요 시) \
-
-# 멀티머
-python client/submit_job.py \
-  --sequence-file sample_data/multimer_sample.fasta \
-  --model-preset multimer \
-  --db-preset full_dbs \
-  # --insecure (인증서 검증 비활성화, 필요 시) \
-
-# 디렉터리 전체 (예시)
-python client/submit_job.py \
-  --fasta-dir sample_data/multimer_batch \
-  --model-preset multimer \
-  --db-preset full_dbs \
-  --save-archive multimer_batch_results.tar.gz
-   # --insecure (인증서 검증 비활성화, 필요 시) \
-
-# 파일 여러 개 (예시)
-python client/submit_job.py \
-  --fasta-path data/a.fasta \
-  --fasta-path data/b.fasta \
-  --model-preset multimer \
-  --db-preset full_dbs
-# --insecure (인증서 검증 비활성화, 필요 시) \  
-
+# 모노머 (단일 체인을 문자열로 전송)
+python client/submit_job.py   --sequence-file sample_data/sequence.fasta   --model-preset monomer   --db-preset full_dbs   # --insecure (인증서검증비활성화, 필요 시 
+# 멀티머 (체인 헤더가 있는 FASTA 그대로 전송)
+python client/submit_job.py   --fasta-path sample_data/multimer_sample.fasta   --model-preset multimer   --db-preset full_dbs   # --insecure (인증서검증비활성화, 필요 시 
+# 디렉터리 일괄 (예시)
+python client/submit_job.py   --fasta-dir sample_data/multimer_batch   --model-preset multimer   --db-preset full_dbs   --save-archive multimer_batch_results.tar.gz
+   # --insecure (인증서검증비활성화, 필요 시 
+# 여러 FASTA 파일 (예시)
+python client/submit_job.py   --fasta-path data/a.fasta   --fasta-path data/b.fasta   --model-preset multimer   --db-preset full_dbs
+# --insecure (인증서검증비활성화, 필요 시 
 ```
 
-`RETURN_ARCHIVE=1` 로 설정했다면 작업 완료 시 압축 파일(base64)도 함께 반환됩니다.
+- `--sequence-file`은 FASTA 헤더(`>chainA` 등)를 제거하고 모든 서열을 하나로 붙이므로 모노머 전용으로 쓰세요. 멀티머 체인을 유지하려면 `--fasta-path`나 `--fasta-dir`을 사용합니다.
+- 멀티머 preset의 기본값은 모델당 5개 시드(`--num_multimer_predictions_per_model=5`)라서 최대 25개의 `ranked_*.pdb`가 생성됩니다. 필요하면 `ALPHAFOLD_EXTRA_FLAGS="--num_multimer_predictions_per_model=1"`을 환경 변수로 주거나 `client/submit_job.py --extra-flags "--num_multimer_predictions_per_model=1"`처럼 요청마다 줄 수 있습니다.
 
----
+`RETURN_ARCHIVE=1` 로 설정하면 작업 완료 시 결과 압축 파일(base64)까지 함께 반환합니다.
 
 ## 5. 자주 발생하는 문제 해결
 
