@@ -36,6 +36,8 @@
    RETURN_ARCHIVE=1
    LOG_LEVEL=DEBUG
    ```
+   - 각 요청은 `/outputs/job-<timestamp>-xxxxxx`와 같은 전용 하위 폴더에서 실행되며, 응답 생성이 끝나면 폴더를 자동으로 삭제합니다. 결과 디렉터리를 보존하려면 `PRESERVE_JOB_OUTPUT=1`을 설정하세요.
+   - `run_alphafold.sh`는 기본적으로 `OUTPUT_CLEANUP=1` 상태에서 시작하여 출력 경로에 남아 있던 파일을 먼저 비웁니다. 동일한 경로에 여러 결과를 누적하려면 `OUTPUT_CLEANUP=0`으로 비활성화할 수 있습니다.
    > **DB 파일 경로를 명시해야 하는 경우**
    > 기본적으로 `run_alphafold.sh`가 모든 경로를 자동으로 찾지만, 디렉터리 구조가 달라 hhsearch/bfd 관련 오류가 뜬다면 아래 환경 변수로 정확한 파일/프리픽스를 지정해 주세요.
 > ```
@@ -154,7 +156,8 @@ python client/submit_job.py \
 
 | 증상 | 원인 / 해결책 |
 | --- | --- |
-| `pdb_seqres must not be set ... monomer` | 모노머 preset인데 `pdb_seqres` 를 넘겼을 때 발생. 환경변수 비우거나 최신 `run_alphafold.sh` 사용. |
+| `pdb_seqres must not be 
+ ... monomer` | 모노머 preset인데 `pdb_seqres` 를 넘겼을 때 발생. 환경변수 비우거나 최신 `run_alphafold.sh` 사용. |
 | `pdb70 must not be set ... multimer` | 멀티머 preset인데 `pdb70` 경로가 포함됨. `MODEL_PRESET=multimer` 로 실행하면 자동으로 처리. |
 | `HHBlits database ... not found` | `bfd_metaclust...` 디렉터리 구조 불일치. 압축 해제 후 디렉터리를 올바른 이름으로 맞추거나 `ln -s`. |
 | `Jackhmmer` 가 오래 걸린다 | 정상. CPU 단계로 수 분~수십 분 소요될 수 있음. 로그가 진행되는지만 확인. |

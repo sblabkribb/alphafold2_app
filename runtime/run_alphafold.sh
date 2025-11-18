@@ -26,6 +26,7 @@ fi
 
 FASTA_INPUT="$1"
 OUTPUT_DIR="$(realpath "$2")"
+OUTPUT_CLEANUP="${OUTPUT_CLEANUP:-1}"
 
 FASTA_PATHS=""
 if [[ -d "${FASTA_INPUT}" ]]; then
@@ -64,6 +65,24 @@ if [[ ! -d "${ALPHAFOLD_DIR}" ]]; then
 fi
 
 mkdir -p "${OUTPUT_DIR}"
+
+purge_output_dir() {
+    local target="$1"
+    if [[ "${OUTPUT_CLEANUP}" != "1" ]]; then
+        return
+    fi
+    if [[ -z "${target}" || "${target}" == "/" ]]; then
+        echo "Refusing to clean unsafe output directory: '${target}'" >&2
+        exit 6
+    fi
+    if [[ -d "${target}" ]]; then
+        shopt -s dotglob
+        rm -rf "${target}/"*
+        shopt -u dotglob
+    fi
+}
+
+purge_output_dir "${OUTPUT_DIR}"
 
 echo "[+] Running Alphafold:"
 echo "    FASTA_PATHS=${FASTA_PATHS}"

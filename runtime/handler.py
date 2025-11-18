@@ -332,11 +332,14 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
         working_dir = Path(working_dir_str)
         fasta_input = _prepare_fasta_inputs(input_payload, working_dir)
 
-        output_dir = Path(
+        output_parent = Path(
             input_payload.get("output_dir")
             or os.environ.get("ALPHAFOLD_OUTPUT", "/outputs")
         )
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_parent.mkdir(parents=True, exist_ok=True)
+        job_output_dir = Path(
+            tempfile.mkdtemp(prefix="job-", dir=str(output_parent))
+        )
 
         env = os.environ.copy()
         if "model_preset" in input_payload:
@@ -352,7 +355,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             "/bin/bash",
             "/app/run_alphafold.sh",
             str(fasta_input),
-            str(output_dir),
+            str(job_output_dir),
         ]
 
         logger.info("Running command: %s", " ".join(command))
@@ -373,10 +376,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
                 "details": exc.stdout.decode("utf-8"),
             }
 
-    outputs = _collect_outputs(output_dir)
+    outputs = _collect_outputs(job_output_dir)
+    job_dir_str = str(job_output_dir)
+    should_cleanup = os.environ.get("PRESERVE_JOB_OUTPUT", "0") != "1"
+    if should_cleanup:
+        try:
+            shutil.rmtree(job_output_dir, ignore_errors=True)
+        except Exception as cleanup_error:  # pragma: no cover
+            logger.warning("Failed to remove job output dir %s: %s", job_dir_str, cleanup_error)
+
     return {
         "status": "success",
-        "output_dir": str(output_dir),
+        "output_dir": job_dir_str,
+        "output_parent": str(output_parent),
         **outputs,
     }
 

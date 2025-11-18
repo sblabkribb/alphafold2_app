@@ -157,7 +157,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-template-date", default="2020-05-14")
     parser.add_argument("--extra-flags", help="Extra flags passed to run_alphafold")
     parser.add_argument("--poll-interval", type=int, default=10, help="Polling interval seconds")
-    parser.add_argument("--timeout", type=int, default=3600, help="Total poll timeout seconds")
+    parser.add_argument("--timeout", type=int, default=144000, help="Total poll timeout seconds")
     parser.add_argument("--save-archive", type=Path, default=Path("alphafold_results.tar.gz"))
     parser.add_argument("--ca-bundle", help="CA bundle for TLS inspection environments")
     parser.add_argument("--append-certifi", action="store_true", help="Append certifi bundle to provided CA")
