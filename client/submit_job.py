@@ -6,13 +6,15 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import os
 import sys
+import tarfile
 import time
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import certifi
 import requests
@@ -52,12 +54,26 @@ def _resolve_verify(ca_bundle: Optional[str], append_certifi: bool) -> Any:
     return True
 
 
-def build_payload(args: argparse.Namespace) -> Dict[str, Any]:
+def build_payload(args: argparse.Namespace) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     payload: Dict[str, Any] = {}
+    upload_spec: Optional[Dict[str, Any]] = None
+
     if args.fasta_dir:
-        payload["fasta_dir"] = str(Path(args.fasta_dir).expanduser())
+        dir_path = Path(args.fasta_dir).expanduser()
+        payload["fasta_dir"] = str(dir_path)
+        upload_spec = {
+            "kind": "fasta_dir",
+            "path": dir_path,
+            "archive_name": f"{dir_path.name}.tar.gz",
+        }
     elif args.fasta_path:
-        payload["fasta_paths"] = [str(Path(p).expanduser()) for p in args.fasta_path]
+        paths = [Path(p).expanduser() for p in args.fasta_path]
+        payload["fasta_paths"] = [str(p) for p in paths]
+        upload_spec = {
+            "kind": "fasta_paths",
+            "paths": paths,
+            "archive_name": "fasta_inputs.tar.gz",
+        }
     elif args.sequence_file:
         payload["sequence"] = _read_sequence_from_fasta(Path(args.sequence_file))
     elif args.sequence:
@@ -75,7 +91,49 @@ def build_payload(args: argparse.Namespace) -> Dict[str, Any]:
         payload["max_template_date"] = args.max_template_date
     if args.extra_flags:
         payload["alphafold_extra_flags"] = args.extra_flags
-    return payload
+    return payload, upload_spec
+
+
+def _create_upload_archive(upload_spec: Dict[str, Any]) -> Dict[str, Any]:
+    kind = upload_spec["kind"]
+    buffer = io.BytesIO()
+    archive_name = upload_spec.get("archive_name") or "fasta_inputs.tar.gz"
+
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        if kind == "fasta_dir":
+            dir_path: Path = upload_spec["path"]
+            if not dir_path.is_dir():
+                raise FileNotFoundError(f"FASTA directory not found: {dir_path}")
+            tar.add(str(dir_path), arcname=dir_path.name)
+            upload_meta = {"root": dir_path.name}
+        elif kind == "fasta_paths":
+            paths = upload_spec["paths"]
+            missing = [str(p) for p in paths if not p.is_file()]
+            if missing:
+                raise FileNotFoundError(f"FASTA file(s) not found: {', '.join(missing)}")
+            for path in paths:
+                tar.add(str(path), arcname=path.name)
+            upload_meta = {"file_names": [p.name for p in paths]}
+        else:
+            raise ValueError(f"Unsupported upload spec kind: {kind}")
+
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    upload_payload: Dict[str, Any] = {
+        "kind": kind,
+        "archive_name": archive_name,
+        "base64": encoded,
+    }
+    upload_payload.update(upload_meta)
+    return upload_payload
+
+
+def maybe_attach_upload(payload: Dict[str, Any], upload_spec: Optional[Dict[str, Any]]) -> None:
+    if not upload_spec:
+        return
+    upload_payload = _create_upload_archive(upload_spec)
+    payload.pop("fasta_dir", None)
+    payload.pop("fasta_paths", None)
+    payload["input_archive"] = upload_payload
 
 
 def submit_job(api_key: str, endpoint_id: str, payload: Dict[str, Any], verify: Any) -> str:
@@ -164,6 +222,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--insecure", action="store_true", help="Disable TLS verification (development only)")
     parser.add_argument("--async", dest="do_async", action="store_true", help="Submit and print job id without polling")
     parser.add_argument("--status", help="Poll an existing job id and print its final result")
+    parser.add_argument(
+        "--upload-inputs",
+        action="store_true",
+        help="Package local FASTA files or directories into the submission payload for remote execution",
+    )
     return parser.parse_args()
 
 
@@ -189,7 +252,15 @@ def main() -> None:
             save_archives(output, args.save_archive)
         return
 
-    payload = build_payload(args)
+    payload, upload_spec = build_payload(args)
+    if args.upload_inputs:
+        if upload_spec:
+            maybe_attach_upload(payload, upload_spec)
+        else:
+            print(
+                "[!] --upload-inputs was provided but there were no local FASTA paths or directories to upload.",
+                file=sys.stderr,
+            )
     print(json.dumps({"input": payload}, indent=2, ensure_ascii=False))
 
     job_id = submit_job(api_key, endpoint_id, payload, verify)

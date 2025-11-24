@@ -1,5 +1,6 @@
 import argparse
 import base64
+import io
 import json
 import logging
 import os
@@ -99,6 +100,73 @@ def _copy_fasta_files(source_files: Iterable[Path], destination_dir: Path) -> Pa
     if copied == 0:
         raise ValueError(f"No FASTA files found to copy into {destination_dir}")
     return destination_dir
+
+
+def _safe_extract_tar_bytes(data: bytes, destination: Path) -> None:
+    destination.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
+        dest_root = destination.resolve()
+        for member in tar.getmembers():
+            member_path = destination / member.name
+            try:
+                member_resolved = member_path.resolve()
+            except FileNotFoundError:
+                # Path may not exist yet; resolve parent
+                member_resolved = (destination / Path(member.name).parent).resolve()
+            if not str(member_resolved).startswith(str(dest_root)):
+                raise ValueError("Uploaded archive contains unsafe paths.")
+        tar.extractall(path=destination)
+
+
+def _materialize_uploaded_inputs(input_payload: Dict[str, Any], working_dir: Path) -> None:
+    upload = input_payload.get("input_archive")
+    if not upload:
+        return
+
+    logger.info("Decoding uploaded FASTA archive (kind=%s)", upload.get("kind"))
+    archive_b64 = upload.get("base64")
+    if not archive_b64:
+        raise ValueError("input_archive missing base64 payload")
+
+    try:
+        archive_bytes = base64.b64decode(archive_b64)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ValueError("Failed to decode base64 input archive") from exc
+
+    extract_dir = working_dir / "uploaded_inputs"
+    _safe_extract_tar_bytes(archive_bytes, extract_dir)
+
+    kind = upload.get("kind")
+    if kind == "fasta_dir":
+        root_name = upload.get("root")
+        candidate = extract_dir / root_name if root_name else extract_dir
+        if not candidate.exists():
+            sub_entries = sorted(extract_dir.iterdir())
+            if len(sub_entries) == 1:
+                candidate = sub_entries[0]
+        if not candidate.exists():
+            raise ValueError("Uploaded archive did not contain the expected FASTA directory")
+        input_payload["fasta_dir"] = str(candidate)
+    elif kind == "fasta_paths":
+        fasta_files = [p for p in extract_dir.rglob("*") if p.is_file() and _is_fasta_file(p)]
+        if not fasta_files:
+            raise ValueError("Uploaded FASTA archive did not contain any FASTA files")
+        ordered: List[Path] = []
+        file_names = upload.get("file_names") or []
+        if file_names:
+            lookup = {p.name: p for p in fasta_files}
+            for name in file_names:
+                path = lookup.pop(name, None)
+                if path:
+                    ordered.append(path)
+            ordered.extend(sorted(lookup.values()))
+        else:
+            ordered = sorted(fasta_files)
+        input_payload["fasta_paths"] = [str(p) for p in ordered]
+    else:
+        raise ValueError(f"Unknown uploaded input kind: {kind}")
+
+    input_payload.pop("input_archive", None)
 
 
 def _prepare_fasta_inputs(input_payload: Dict[str, Any], working_dir: Path) -> Path:
@@ -330,6 +398,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
 
     with tempfile.TemporaryDirectory(prefix="alphafold-input-") as working_dir_str:
         working_dir = Path(working_dir_str)
+        _materialize_uploaded_inputs(input_payload, working_dir)
         fasta_input = _prepare_fasta_inputs(input_payload, working_dir)
 
         output_parent = Path(
