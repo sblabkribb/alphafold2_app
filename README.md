@@ -119,15 +119,16 @@ bash -x /app/run_alphafold.sh ... 2>&1 | tee /workspace/af_out/run.log
 # 모노머 (단일 체인을 문자열로 전송)
 python client/submit_job.py   --sequence-file sample_data/sequence.fasta   --model-preset monomer   --db-preset full_dbs   # --insecure (인증서검증비활성화, 필요 시 
 # 멀티머 (체인 헤더가 있는 FASTA 그대로 전송)
-python client/submit_job.py   --fasta-path sample_data/multimer_sample.fasta   --model-preset multimer   --db-preset full_dbs   # --insecure (인증서검증비활성화, 필요 시 
+python client/submit_job.py   --fasta-path sample_data/multimer_sample.fasta   --model-preset multimer   --db-preset full_dbs   --upload-inputs   # --insecure (인증서검증비활성화, 필요 시 
 # 디렉터리 일괄 (예시)
-python client/submit_job.py   --fasta-dir sample_data/multimer_batch   --model-preset multimer   --db-preset full_dbs   --save-archive multimer_batch_results.tar.gz
+python client/submit_job.py   --fasta-dir sample_data/multimer_batch   --model-preset multimer   --db-preset full_dbs   --save-archive multimer_batch_results.tar.gz   --upload-inputs
    # --insecure (인증서검증비활성화, 필요 시 
 # 여러 FASTA 파일 (예시)
-python client/submit_job.py   --fasta-path data/a.fasta   --fasta-path data/b.fasta   --model-preset multimer   --db-preset full_dbs
+python client/submit_job.py   --fasta-path data/a.fasta   --fasta-path data/b.fasta   --model-preset multimer   --db-preset full_dbs   --upload-inputs
 # --insecure (인증서검증비활성화, 필요 시 
 ```
 
+- `--upload-inputs` packages your local FASTA files/directories into a tar.gz payload so the serverless worker can access them. Skip this flag only when the provided path already exists on the RunPod volume.
 - `--sequence-file`은 FASTA 헤더(`>chainA` 등)를 제거하고 모든 서열을 하나로 붙이므로 모노머 전용으로 쓰세요. 멀티머 체인을 유지하려면 `--fasta-path`나 `--fasta-dir`을 사용합니다.
 - 멀티머 preset의 기본값은 모델당 5개 시드(`--num_multimer_predictions_per_model=5`)라서 최대 25개의 `ranked_*.pdb`가 생성됩니다. 필요하면 `ALPHAFOLD_EXTRA_FLAGS="--num_multimer_predictions_per_model=1"`을 환경 변수로 주거나 `client/submit_job.py --extra-flags "--num_multimer_predictions_per_model=1"`처럼 요청마다 줄 수 있습니다.
 
@@ -158,6 +159,7 @@ python client/submit_job.py   --fasta-path data/a.fasta   --fasta-path data/b.fa
 
 ## 7. Batch 입력/결과 관리 메모
 
+- Use `client/submit_job.py --upload-inputs ...` whenever the FASTA data lives only on your workstation. If the server can already read the referenced path (e.g., `/runpod-volume/...`), you can omit the flag.
 - 동일한 `MODEL_PRESET`(monomer 또는 multimer)끼리만 한 배치로 제출하세요. 다른 preset을 섞으면 잘못된 파이프라인으로 실행됩니다.
 - `client/submit_job.py` 는 `--fasta-dir` 또는 반복 가능한 `--fasta-path` 옵션으로 여러 FASTA를 한 번에 보낼 수 있습니다.
 - 런타임은 FASTA별 서브 디렉터리를 만들어 `ARCHIVE_PATTERNS`(기본: ranked/relaxed/metrics/timings/plddt/pae) 에 해당하는 파일만 각 FASTA 이름의 tar.gz로 반환합니다.
@@ -166,4 +168,18 @@ python client/submit_job.py   --fasta-path data/a.fasta   --fasta-path data/b.fa
 
 
 
+
+
+---
+
+## 8. Jupyter Notebook Helper
+
+`notebooks/alphafold_submit.ipynb` provides a widget-driven helper for uploading local FASTA data with the new client workflow.
+
+1. Run the optional install cell (`pip install ipyfilechooser`) if the widget is missing.
+2. Use the file/folder choosers to point at the FASTA file (monomer) and directory/batch (multimer).
+3. Fill in the RunPod API key, endpoint ID, DB preset, archive output path, and any extra flags via the widgets.
+4. Execute the Monomer or Multimer cell to launch `client/submit_job.py --upload-inputs ...`; the notebook streams the command and logs inline.
+
+This notebook mirrors the CLI flags but makes it easy to pick files locally and confirm the upload/polling flow from a single UI.
 
